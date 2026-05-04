@@ -1,0 +1,24 @@
+{
+  "pipeline": "ISL-CSLTR HexaMinds Orchestration",
+  "total_videos": 11980,
+  "extracted_ok": 11980,
+  "extracted_fail": 0,
+  "qa_passed": 10752,
+  "qa_rejected": 1228,
+  "reject_breakdown": {
+    "low_conf": 1149,
+    "hand_null": 77,
+    "too_short": 2
+  },
+  "unique_glosses": 2000,
+  "landmark_size_gb": 4.4639,
+  "target_size_gb": 5.0,
+  "within_target": true,
+  "elapsed_sec": 26371.9,
+  "outputs": {
+    "label_map": "label_map.json",
+    "vocab": "vocab.json",
+    "metadata": "metadata.csv",
+    "landmarks": "isl_landmarks"
+  }
+}

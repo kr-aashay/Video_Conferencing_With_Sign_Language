@@ -1,0 +1,341 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HexaMinds — Live Caption</title>
+
+
+
+  <link rel="stylesheet" href="./receiver.css" />
+</head>
+
+<body>
+<div class="receiver-root">
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       TOP BAR
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo-mark">
+        <div class="logo-pulse"></div>
+        HexaMinds
+      </div>
+      <div class="topbar-divider"></div>
+      <span class="page-label">Live Caption — Receiver</span>
+    </div>
+
+    <div class="topbar-right">
+      <!-- AI Bridge status — turns green when engine is ready. -->
+      <span class="pill idle" id="pill-ai">
+        <span class="pip"></span>
+        <span id="pill-ai-text">AI Bridge</span>
+      </span>
+      <span class="pill idle" id="pill-room">
+        <span class="pip"></span>
+        <span id="pill-room-text">No Room</span>
+      </span>
+      <span class="pill idle" id="pill-stream">
+        <span class="pip"></span>
+        <span id="pill-stream-text">Stream Off</span>
+      </span>
+
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       VIDEO STAGE
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <main class="stage" id="stage">
+
+    <!-- Remote video stream -->
+    <video id="remote-video" autoplay playsinline></video>
+
+    <!-- Waiting / loading state -->
+    <div class="waiting-overlay" id="waiting-overlay">
+      <div class="grid-loader" aria-hidden="true">
+        <!-- 20 animated cells -->
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+        <div class="grid-cell"></div><div class="grid-cell"></div>
+      </div>
+      <p class="waiting-label" id="waiting-label">Waiting for signer</p>
+      <p class="waiting-sub"  id="waiting-sub">Join the call to begin</p>
+    </div>
+
+    <!-- Reconnecting banner -->
+    <div class="reconnect-banner" id="reconnect-banner" role="status">
+      Reconnecting…
+    </div>
+
+    <!-- Latency chip -->
+    <div class="latency-chip" id="latency-chip" aria-live="polite">— ms</div>
+
+    <!-- ── Caption overlay (lower-third) ─────────────────────────────────── -->
+    <div class="caption-overlay" role="region" aria-label="Live captions" aria-live="polite">
+      <div class="caption-tray idle" id="caption-tray">
+        <!-- Shimmer shown while idle -->
+        <div class="caption-shimmer" aria-hidden="true"></div>
+        <!-- Caption lines injected here by JS -->
+        <div class="gloss-row empty" id="gloss-row"></div>
+      </div>
+    </div>
+
+  </main><!-- /stage -->
+
+</div><!-- /receiver-root -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     APPLICATION SCRIPT
+══════════════════════════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CONFIG
+   ════════════════════════════════════════════════════════════════════════════ */
+const CFG = {
+  // Caption display settings
+  captionTimeout:  5000,   // ms — clear captions after silence
+  maxCaptionLines: 3,      // teleprompter history depth
+};
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DOM REFS
+   ════════════════════════════════════════════════════════════════════════════ */
+const remoteVideo      = document.getElementById('remote-video');
+const waitingOverlay   = document.getElementById('waiting-overlay');
+const waitingLabel     = document.getElementById('waiting-label');
+const waitingSub       = document.getElementById('waiting-sub');
+const reconnectBanner  = document.getElementById('reconnect-banner');
+const latencyChip      = document.getElementById('latency-chip');
+const captionTray      = document.getElementById('caption-tray');
+const glossRow         = document.getElementById('gloss-row');
+const pillAi           = document.getElementById('pill-ai');
+const pillAiText       = document.getElementById('pill-ai-text');
+const pillRoom         = document.getElementById('pill-room');
+const pillRoomText     = document.getElementById('pill-room-text');
+const pillStream       = document.getElementById('pill-stream');
+const pillStreamText   = document.getElementById('pill-stream-text');
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PILL HELPERS
+   ════════════════════════════════════════════════════════════════════════════ */
+function setPill(el, textEl, cls, text) {
+  el.className = `pill ${cls}`;
+  textEl.textContent = text;
+}
+/* ════════════════════════════════════════════════════════════════════════════
+   LATENCY DISPLAY
+   ════════════════════════════════════════════════════════════════════════════ */
+let captionLines    = [];      // array of DOM elements currently in tray
+let captionTimer    = null;    // auto-clear timeout handle
+let captionCount    = 0;
+let latencyHistory  = [];      // rolling window for avg latency display
+
+/* ════════════════════════════════════════════════════════════════════════════
+   AI BRIDGE HEARTBEAT
+   Polls /health/detail every 6 s. The AI pill turns green when engine is ready.
+   ════════════════════════════════════════════════════════════════════════════ */
+const AI_HEALTH_URL      = 'http://localhost:8000/health/detail';
+const AI_POLL_INTERVAL   = 6000;   // ms
+let   _aiPollTimer       = null;
+let   _aiLastLatencyMs   = null;
+
+async function pollAiBridge() {
+  try {
+    const r = await fetch(AI_HEALTH_URL, { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    const engineOk = data.engine_ready === true;
+
+    if (engineOk) {
+      setPill(pillAi, pillAiText, 'live', 'AI Ready');
+    } else {
+      setPill(pillAi, pillAiText, 'error', 'AI Offline');
+    }
+
+    // Surface latency stats in the chip if available
+    const stats = data.latency_stats;
+    if (stats && stats.count > 0) {
+      _aiLastLatencyMs = stats.mean_ms;
+      const breach = stats.sla_breach_pct > 0
+        ? ` ⚠${stats.sla_breach_pct}%`
+        : '';
+      latencyChip.title = `p50=${stats.p50_ms}ms p95=${stats.p95_ms}ms${breach}`;
+    }
+
+  } catch {
+    setPill(pillAi, pillAiText, 'error', 'AI Offline');
+  }
+}
+
+function startAiHeartbeat() {
+  pollAiBridge();   // immediate first check
+  _aiPollTimer = setInterval(pollAiBridge, AI_POLL_INTERVAL);
+}
+
+function stopAiHeartbeat() {
+  clearInterval(_aiPollTimer);
+  _aiPollTimer = null;
+  setPill(pillAi, pillAiText, 'idle', 'AI Bridge');
+}
+
+// Start polling as soon as the page loads
+startAiHeartbeat();
+
+/* ════════════════════════════════════════════════════════════════════════════
+   STATE
+   ════════════════════════════════════════════════════════════════════════════ */
+function updateLatency(ms) {
+  latencyHistory.push(ms);
+  if (latencyHistory.length > 10) latencyHistory.shift();
+  const avg = Math.round(latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length);
+  latencyChip.textContent = `${avg} ms`;
+  latencyChip.className = 'latency-chip ' + (avg < 200 ? 'fast' : avg < 400 ? '' : 'slow');
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CAPTION RENDERER
+   Teleprompter effect:
+     - New caption slides in from below
+     - Previous lines age (smaller, dimmer)
+     - Oldest line exits before being removed
+     - Auto-clears after CFG.captionTimeout ms of silence
+   ════════════════════════════════════════════════════════════════════════════ */
+function pushCaption(text, glosses, partial = false) {
+  // Clear the auto-timeout
+  clearTimeout(captionTimer);
+
+  // Remove idle shimmer state
+  captionTray.classList.remove('idle');
+
+  // Age existing lines
+  captionLines.forEach((el, i) => {
+    el.classList.remove('aging', 'oldest');
+    const age = captionLines.length - i;   // 1 = most recent existing
+    if (age === 1) el.classList.add('aging');
+    if (age >= 2)  el.classList.add('oldest');
+  });
+
+  // Evict the oldest line if we're at capacity
+  if (captionLines.length >= CFG.maxCaptionLines) {
+    const evict = captionLines.shift();
+    evict.classList.add('exiting');
+    // Remove from DOM after exit animation completes (300ms)
+    setTimeout(() => evict.remove(), 320);
+  }
+
+  // Create new caption line
+  const line = document.createElement('p');
+  line.className   = 'caption-line';
+
+  if (partial) {
+    // Typewriter mode — update text in place, show cursor
+    line.textContent = text;
+    line.classList.add('typing');
+  } else {
+    line.textContent = text;
+    line.classList.remove('typing');
+  }
+
+  // Insert before the gloss row
+  captionTray.insertBefore(line, glossRow);
+  captionLines.push(line);
+
+  // Render gloss chips
+  renderGlosses(glosses);
+
+  captionCount++;
+
+  // Schedule auto-clear
+  captionTimer = setTimeout(() => clearCaptions(), CFG.captionTimeout);
+}
+
+function clearCaptions() {
+  captionLines.forEach(el => {
+    el.classList.add('exiting');
+    setTimeout(() => el.remove(), 320);
+  });
+  captionLines = [];
+  clearGlosses();
+  captionTray.classList.add('idle');
+}
+
+function renderGlosses(glosses) {
+  glossRow.innerHTML = '';
+  const clean = (glosses || []).filter(g => g !== '<blank>' && g !== '<unk>');
+  if (!clean.length) {
+    glossRow.classList.add('empty');
+    return;
+  }
+  glossRow.classList.remove('empty');
+  clean.forEach((g, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'g-chip';
+    chip.textContent = g;
+    chip.style.animationDelay = `${i * 40}ms`;
+    glossRow.appendChild(chip);
+  });
+}
+
+function clearGlosses() {
+  glossRow.innerHTML = '';
+  glossRow.classList.add('empty');
+}
+
+
+
+  // Typewriter delivery: partial=true updates the current line in-place;
+  // partial=false (or absent) commits the line and starts a new one.
+  const partial = payload.partial === true;
+
+  if (partial && captionLines.length > 0) {
+    // Update the last line in-place — no new DOM element
+    const last = captionLines[captionLines.length - 1];
+    last.textContent = caption;
+    last.classList.add('typing');
+  } else {
+    // Remove typing cursor from previous line
+    captionLines.forEach(l => l.classList.remove('typing'));
+    pushCaption(caption, glosses || [], false);
+    updateLatency(latency_ms ?? 0);
+    captionCount++;
+    console.debug(
+      `[Receiver] Caption #${captionCount}: "${caption}" | ${Math.round(latency_ms ?? 0)}ms`
+    );
+  }
+}
+
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   WAITING OVERLAY HELPERS
+   ════════════════════════════════════════════════════════════════════════════ */
+function setWaiting(label, sub) {
+  waitingLabel.textContent = label;
+  waitingSub.textContent   = sub;
+  waitingOverlay.classList.remove('hidden');
+}
+
+function hideWaiting() {
+  waitingOverlay.classList.add('hidden');
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SESSION LIFECYCLE
+   ════════════════════════════════════════════════════════════════════════════ */
+
+</script>
+</body>
+</html>
