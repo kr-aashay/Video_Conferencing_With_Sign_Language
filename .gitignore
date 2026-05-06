@@ -2,6 +2,12 @@
 .env
 *.env
 
+# IDE config
+.claude/
+.vscode/
+.kiro/
+.watchfilesignore
+
 # Python
 __pycache__/
 *.py[cod]
