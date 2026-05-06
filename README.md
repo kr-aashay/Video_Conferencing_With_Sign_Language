@@ -23,10 +23,15 @@ Signer performs gesture → MediaPipe detects it → Gemini generates caption �
 
 ---
 
-## Supported Gestures
+## Supported Signs
 
-| Gesture | Label |
-|---------|-------|
+This project uses **two complementary recognition systems**:
+
+### System 1 — MediaPipe Gesture Recognizer (Browser)
+Runs directly in the browser via WebAssembly for instant, low-latency detection of 7 common gestures:
+
+| Gesture | Sign Label |
+|---------|-----------|
 | Open Palm | HELLO |
 | Thumb Up | YES |
 | Thumb Down | NO |
@@ -34,6 +39,14 @@ Signer performs gesture → MediaPipe detects it → Gemini generates caption �
 | Closed Fist | STOP |
 | Victory ✌️ | PEACE |
 | ILoveYou 🤟 | LOVE |
+
+### System 2 — Custom Bi-LSTM Model (Server-side)
+A deep learning model trained on the **ISL-CSLTR dataset** capable of recognizing **2,001 signs** across continuous sign language sequences.
+
+Sample signs from the vocabulary:
+> A, A LOT, ABDOMEN, ABLE, ABOUT, ABOVE, ACCEPT, ACCIDENT, ACCOMPLISH, ACCOUNTANT, ACROSS, ACT, ACTION, ACTIVE, ACTIVITY, ACTOR, ADAPT, ADD ... and 1,994 more.
+
+The full vocabulary covers everyday conversation, medical terms, professions, actions, emotions, objects and more — making it suitable for real-world ISL communication.
 
 ---
 
@@ -75,6 +88,7 @@ ClassifierHead    Linear(512→256→vocab_size)
 
 - **Accuracy:** 91.2%
 - **Dataset:** ISL-CSLTR (11,980 videos, 641 classes)
+- **Vocabulary:** 2,001 signs
 
 ### Gemini 2.0 Flash
 Converts sign glosses (e.g. `HELLO I LOVE`) into natural English sentences (e.g. `"Hello, I love you."`). Uses per-room conversation history for pronoun resolution and context.
