@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — Aashay's Sign Lang{% endblock %}
+
+{% block content %}
+<h1><b>Welcome</b> {{ first_name }} {{ last_name }}</h1>
+<hr>
+<div class="button-container mt-4">
+    <a class="btn btn-primary btn-lg mr-2" href="/meeting">Create Meeting</a>
+    <a class="btn btn-primary btn-lg mr-2" href="/join">Join Meeting</a>
+    <a class="btn btn-outline-light btn-lg" href="/logout">Logout</a>
+</div>
+{% endblock %}

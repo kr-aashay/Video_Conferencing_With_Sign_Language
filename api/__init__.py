@@ -1,1 +1,1 @@
-"""api — HexaMinds FastAPI WebSocket inference bridge."""
+"""api — Aashay's Sign Lang FastAPI WebSocket inference bridge."""

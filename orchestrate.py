@@ -650,7 +650,7 @@ def write_report(stats: PipelineStats) -> None:
     stats.landmark_size_gb = _disk_gb(OUTPUT_DIR)
 
     report = {
-        "pipeline":          "ISL-CSLTR HexaMinds Orchestration",
+        "pipeline":          "ISL-CSLTR Aashay's Sign Lang Orchestration",
         "total_videos":      stats.total_videos,
         "extracted_ok":      stats.extracted_ok,
         "extracted_fail":    stats.extracted_fail,
@@ -675,7 +675,7 @@ def write_report(stats: PipelineStats) -> None:
     # ── Human-readable summary ────────────────────────────────────────────────
     sep = "═" * 60
     log.info(sep)
-    log.info("  HexaMinds Pipeline Report")
+    log.info("  Aashay's Sign Lang Pipeline Report")
     log.info(sep)
     log.info("  Videos found          : %d", stats.total_videos)
     log.info("  Extracted (ok/fail)   : %d / %d",
@@ -711,7 +711,7 @@ def main() -> None:
 
     sep = "═" * 60
     log.info(sep)
-    log.info("  HexaMinds — ISL-CSLTR Orchestration Pipeline")
+    log.info("  Aashay's Sign Lang — ISL-CSLTR Orchestration Pipeline")
     log.info(sep)
 
     # ── Download ──────────────────────────────────────────────────────────────

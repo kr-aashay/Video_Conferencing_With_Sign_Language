@@ -75,7 +75,7 @@ def preflight(api_port: int) -> bool:
     Returns True if all required checks pass.
     """
     log.info("═" * 56)
-    log.info("  HexaMinds Pre-flight Checks")
+    log.info("  Aashay's Sign Lang Pre-flight Checks")
     log.info("═" * 56)
 
     ok = True
@@ -284,7 +284,7 @@ def start_heartbeat(port: int, interval: int = HEARTBEAT_INTERVAL) -> threading.
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="HexaMinds unified launcher",
+        description="Aashay's Sign Lang unified launcher",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--api-only",      action="store_true", help="Start API server only")
@@ -301,7 +301,7 @@ def main() -> None:
         sys.exit(0 if checks_ok else 1)
 
     log.info("═" * 56)
-    log.info("  HexaMinds — Starting Services")
+    log.info("  Aashay's Sign Lang — Starting Services")
     log.info("═" * 56)
 
     api_proc = None

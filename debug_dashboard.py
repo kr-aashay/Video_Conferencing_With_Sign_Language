@@ -1,7 +1,7 @@
 """
 debug_dashboard.py
 ══════════════════════════════════════════════════════════════════════════════
-HexaMinds — Real-time Terminal Debugging Dashboard
+Aashay's Sign Lang — Real-time Terminal Debugging Dashboard
 
 Displays a live, auto-refreshing overlay in the terminal showing:
   • Current predicted gloss sequence
@@ -126,7 +126,7 @@ def _draw(
     DIM = curses.A_DIM
 
     # ── Title bar ─────────────────────────────────────────────────────────────
-    title = " HexaMinds Debug Dashboard "
+    title = " Aashay's Sign Lang Debug Dashboard "
     ts    = datetime.now().strftime("%H:%M:%S")
     _safe_addstr(stdscr, row, 0, "═" * (W - 1), C1)
     _safe_addstr(stdscr, row, max(0, (W - len(title)) // 2), title, C1)
@@ -302,7 +302,7 @@ def _run(stdscr, api_url: str, interval: float, perf_path: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="HexaMinds terminal debug dashboard")
+    parser = argparse.ArgumentParser(description="Aashay's Sign Lang terminal debug dashboard")
     parser.add_argument("--port",     type=int,   default=DEFAULT_PORT,     metavar="N")
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL, metavar="S")
     parser.add_argument("--perf-log", type=str,   default="logs/perf.jsonl")

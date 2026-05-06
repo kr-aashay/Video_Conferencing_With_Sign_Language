@@ -1,7 +1,7 @@
 """
 api/logger.py
 ─────────────
-Structured performance logger for the HexaMinds inference bridge.
+Structured performance logger for Aashay's Sign Lang inference bridge.
 
 Tracks every inference event with microsecond precision and writes
 structured JSON lines to logs/perf.jsonl for offline analysis.
@@ -19,7 +19,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Optional
 
-_perf_log = logging.getLogger("hexaminds.perf")
+_perf_log = logging.getLogger("aashay.signlang.perf")
 
 # ── JSONL sink ────────────────────────────────────────────────────────────────
 _LOG_DIR  = Path("logs")
@@ -77,13 +77,16 @@ class LatencyTracker:
             self._samples.append(latency_ms)
             self._total_events += 1
 
-        # Structured log line
+        # Structured log line — includes p99 for offline analysis
         record = {
             "ts":         int(time.time() * 1000),
             "session":    session_id[:8],
             "room":       room_id,
             "stage":      stage,
             "latency_ms": round(latency_ms, 2),
+            "p50_ms":     self.stats().get("p50_ms", 0),
+            "p95_ms":     self.stats().get("p95_ms", 0),
+            "p99_ms":     self.stats().get("p99_ms", 0),
             "glosses":    glosses,
             "caption":    caption[:80],
         }

@@ -1,7 +1,7 @@
 /**
  * skeleton-renderer.js
  * ══════════════════════════════════════════════════════════════════════════════
- * HexaMinds — Ghost Skeleton overlay renderer
+ * Aashay's Sign Lang — Ghost Skeleton overlay renderer
  *
  * Draws the MediaPipe Holistic landmark skeleton on a transparent canvas
  * layered over the live video feed.  The "ghost" aesthetic uses low-opacity

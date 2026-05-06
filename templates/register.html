@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}Register — Aashay's Sign Lang{% endblock %}
+
+{% block content %}
+{% if msg %}
+<div class="alert alert-danger">{{ msg }}</div>
+{% endif %}
+
+<div class="mb-md-5 mt-md-4 pb-5">
+    <h2 class="fw-bold mb-2 text-uppercase">Register</h2>
+    <p class="text-white-50 mb-5">Create an Account</p>
+
+    <form action="/register" method="POST">
+        <div class="form-outline form-white mb-3">
+            <label for="first_name">First Name</label>
+            <input type="text" id="first_name" name="first_name" class="form-control form-control-lg" required>
+        </div>
+        <div class="form-outline form-white mb-3">
+            <label for="last_name">Last Name</label>
+            <input type="text" id="last_name" name="last_name" class="form-control form-control-lg" required>
+        </div>
+        <div class="form-outline form-white mb-3">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" class="form-control form-control-lg" required>
+        </div>
+        <div class="form-outline form-white mb-3">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" class="form-control form-control-lg"
+                   minlength="4" maxlength="20" required>
+        </div>
+        <div class="form-outline form-white mb-4">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" class="form-control form-control-lg"
+                   minlength="8" maxlength="20" required>
+        </div>
+        <button class="btn btn-outline-light btn-lg px-5" type="submit">Register</button>
+    </form>
+</div>
+
+<div>
+    <p class="mb-0">Already have an account?
+        <a href="/login" class="text-white-50 fw-bold">Login</a>
+    </p>
+</div>
+{% endblock %}

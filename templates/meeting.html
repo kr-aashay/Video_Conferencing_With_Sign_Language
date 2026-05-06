@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Meeting — Aashay's Sign Lang</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        #caption-overlay {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            max-width: 80vw;
+            text-align: center;
+            pointer-events: none;
+        }
+        .caption-box {
+            background: rgba(0, 0, 0, 0.72);
+            color: #ffffff;
+            font-size: 1.4rem;
+            font-weight: 500;
+            padding: 10px 24px;
+            border-radius: 10px;
+            border-bottom: 3px solid #00e6ff;
+            backdrop-filter: blur(8px);
+            animation: fadeIn 0.3s ease;
+            letter-spacing: 0.02em;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        #sign-controls {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        #sign-btn {
+            padding: 8px 18px;
+            background: rgba(0, 230, 255, 0.18);
+            border: 1px solid #00e6ff;
+            color: #00e6ff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        #sign-btn.active { background: rgba(0, 230, 255, 0.45); }
+        #sign-btn:disabled { opacity: 0.5; cursor: wait; }
+        #sign-status {
+            font-size: 0.72rem;
+            color: rgba(255,255,255,0.6);
+            text-align: right;
+            max-width: 200px;
+        }
+        #gesture-chips {
+            position: fixed;
+            top: 100px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: flex-end;
+        }
+        .g-chip {
+            background: rgba(0,230,255,0.12);
+            border: 1px solid rgba(0,230,255,0.35);
+            color: #00e6ff;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 10px;
+            border-radius: 20px;
+            letter-spacing: 0.06em;
+        }
+        .back-to-dashboard {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 9999;
+        }
+        .back-to-dashboard button {
+            padding: 10px 20px;
+            background-color: #ffffff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <div id="sign-controls">
+        <button id="sign-btn" onclick="toggleSignMode()">Enable Sign Mode</button>
+        <div id="sign-status">Sign mode off</div>
+    </div>
+
+    <div id="gesture-chips"></div>
+    <div id="caption-overlay"></div>
+
+    <div class="back-to-dashboard">
+        <a href="/dashboard" style="text-decoration: none;">
+            <button>Back to Dashboard</button>
+        </a>
+    </div>
+
+    <!-- ZegoCloud SDK -->
+    <script src="https://unpkg.com/@zegocloud/zego-uikit-prebuilt/zego-uikit-prebuilt.js"></script>
+
+    <!-- MediaPipe Tasks Vision — served locally, no CDN dependency -->
+    <!-- imported via ES module inside startSignMode() -->
+
+    <script>
+    // ── Server-injected config ────────────────────────────────────────────────
+    const USERNAME    = "{{ username }}";
+    const ZEGO_APP_ID = {{ zego_app_id or 0 }};
+    const ZEGO_SECRET = "{{ zego_secret or '' }}";
+    const WS_BASE     = (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host;
+
+    const roomID = new URLSearchParams(location.search).get("roomID") || String(Math.floor(Math.random()*10000));
+    const userID = String(Math.floor(Math.random()*10000));
+
+    // ── ZegoCloud ─────────────────────────────────────────────────────────────
+    window.onload = function () {
+        if (ZEGO_APP_ID && ZEGO_SECRET) {
+            const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
+                ZEGO_APP_ID, ZEGO_SECRET, roomID, userID, USERNAME
+            );
+            ZegoUIKitPrebuilt.create(kitToken).joinRoom({
+                container: document.querySelector("#root"),
+                sharedLinks: [{ name: "Personal link",
+                    url: location.protocol + "//" + location.host + location.pathname + "?roomID=" + roomID }],
+                scenario: { mode: ZegoUIKitPrebuilt.VideoConference },
+                turnOnMicrophoneWhenJoining: true, turnOnCameraWhenJoining: true,
+                showMyCameraToggleButton: true, showMyMicrophoneToggleButton: true,
+                showAudioVideoSettingsButton: true, showScreenSharingButton: true,
+                showTextChat: true, showUserList: true,
+                maxUsers: 2, layout: "Auto", showLayoutButton: false,
+            });
+        } else {
+            document.getElementById("root").innerHTML =
+                '<div style="color:#fff;padding:40px;text-align:center">' +
+                '<h2>Video conferencing not configured</h2>' +
+                '<p>Add ZEGO_APP_ID and ZEGO_SERVER_SECRET to .env</p></div>';
+        }
+        connectReceiverWS();
+    };
+
+    // ── Receiver WebSocket (everyone listens for captions) ────────────────────
+    let receiverWS = null;
+    function connectReceiverWS() {
+        receiverWS = new WebSocket(`${WS_BASE}/ws/caption/${roomID}/receiver`);
+        receiverWS.onmessage = (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === "caption" && msg.caption) showCaption(msg.caption, msg.tokens || []);
+            } catch {}
+        };
+        receiverWS.onclose = () => setTimeout(connectReceiverWS, 2000);
+    }
+
+    // ── Caption display ───────────────────────────────────────────────────────
+    let captionTimer = null;
+    function showCaption(text, tokens) {
+        const overlay = document.getElementById("caption-overlay");
+        overlay.innerHTML = `<div class="caption-box">${text}</div>`;
+        clearTimeout(captionTimer);
+        captionTimer = setTimeout(() => { overlay.innerHTML = ""; }, 6000);
+        const chips = document.getElementById("gesture-chips");
+        chips.innerHTML = tokens.filter(t => t !== "None")
+            .map(t => `<span class="g-chip">${t}</span>`).join("");
+        setTimeout(() => { chips.innerHTML = ""; }, 4000);
+    }
+
+    function setStatus(msg) { document.getElementById("sign-status").textContent = msg; }
+
+    // ── Sign mode state ───────────────────────────────────────────────────────
+    let signMode = false, senderWS = null, gestureRecognizer = null;
+    let videoStream = null, videoEl = null, rafHandle = null;
+    let tokenBuffer = [], lastGesture = { Left: "", Right: "" };
+    let holdBufs = { Left: [], Right: [] };
+    const HOLD_FRAMES = 10;   // ~0.33s at 30fps — easier to trigger
+    const MIN_CONF    = 0.55; // lower threshold — picks up more gestures
+    const GESTURE_LABELS = {
+        Closed_Fist:"STOP", Open_Palm:"HELLO", Pointing_Up:"I",
+        Thumb_Down:"NO", Thumb_Up:"YES", Victory:"PEACE", ILoveYou:"LOVE",
+    };
+
+    // ── Toggle ────────────────────────────────────────────────────────────────
+    let _starting = false;
+    async function toggleSignMode() {
+        const btn = document.getElementById("sign-btn");
+        if (signMode) {
+            stopSignMode();
+            btn.textContent = "Enable Sign Mode";
+            btn.classList.remove("active");
+            signMode = false;
+            return;
+        }
+        if (_starting) return; // prevent double-click
+        _starting = true;
+        btn.disabled = true;
+        btn.textContent = "Loading...";
+        try {
+            await startSignMode();
+            signMode = true;
+            btn.textContent = "Disable Sign Mode";
+            btn.classList.add("active");
+        } catch (err) {
+            console.error("Sign mode error:", err);
+            setStatus("Error: " + (err.message || String(err)));
+            stopSignMode();
+            btn.textContent = "Enable Sign Mode";
+            btn.classList.remove("active");
+        } finally {
+            btn.disabled = false;
+            _starting = false;
+        }
+    }
+
+    // ── Start sign mode ───────────────────────────────────────────────────────
+    async function startSignMode() {
+        setStatus("Loading MediaPipe...");
+
+        // Import from local static — no CDN, no CORS issues
+        const { GestureRecognizer, FilesetResolver } = await import("/static/vision_bundle.mjs");
+
+        setStatus("Initialising WASM...");
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+
+        setStatus("Loading model...");
+        gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath: "/models/gesture_recognizer.task",
+                delegate: "CPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: 0.5,
+            minHandPresenceConfidence:  0.5,
+            minTrackingConfidence:      0.5,
+        });
+
+        setStatus("Opening camera...");
+        // Open our own camera stream for gesture detection.
+        // Chrome allows multiple consumers of the same camera.
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        videoEl = document.createElement("video");
+        videoEl.srcObject = videoStream;
+        videoEl.playsInline = true;
+        videoEl.muted = true;
+        // Must be in DOM for currentTime to advance
+        videoEl.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:320px;height:240px;opacity:0;pointer-events:none;";
+        document.body.appendChild(videoEl);
+        await videoEl.play();
+        // Wait for first frame
+        await new Promise(res => {
+            if (videoEl.readyState >= 2) { res(); return; }
+            videoEl.addEventListener('loadeddata', res, { once: true });
+            setTimeout(res, 2000);
+        });
+
+        setStatus("Connecting...");
+        senderWS = new WebSocket(`${WS_BASE}/ws/caption/${roomID}/${userID}`);
+        await new Promise((res, rej) => {
+            senderWS.onopen  = res;
+            senderWS.onerror = () => rej(new Error("WebSocket failed"));
+            setTimeout(() => rej(new Error("WebSocket timed out")), 5000);
+        });
+        senderWS.onmessage = (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === "caption" && msg.caption) showCaption(msg.caption, msg.tokens || []);
+            } catch {}
+        };
+
+        setStatus("Sign mode ON — hold a gesture 0.3s");
+        lastVideoTime = -1;
+        frameInterval = setInterval(frameLoop, 33); // ~30fps
+    }
+
+    // ── Stop sign mode ────────────────────────────────────────────────────────
+    function stopSignMode() {
+        if (frameInterval)     { clearInterval(frameInterval); frameInterval = null; }
+        if (rafHandle)         cancelAnimationFrame(rafHandle);
+        if (videoStream)       videoStream.getTracks().forEach(t => t.stop());
+        if (senderWS)          senderWS.close();
+        if (gestureRecognizer) gestureRecognizer.close();
+        if (videoEl && videoEl.parentNode) videoEl.parentNode.removeChild(videoEl);
+        gestureRecognizer = null; videoStream = null; videoEl = null;
+        senderWS = null; rafHandle = null;
+        tokenBuffer = []; lastGesture = { Left:"", Right:"" };
+        holdBufs = { Left:[], Right:[] };
+        setStatus("Sign mode off");
+    }
+
+    // ── Frame loop — use setInterval so it runs even when tab is not focused ──
+    let frameInterval = null;
+    let lastVideoTime  = -1;
+
+    function frameLoop() {
+        if (!gestureRecognizer || !videoEl) return;
+        if (videoEl.readyState < 2) return;
+        // Use currentTime to skip duplicate frames, but don't block on it
+        const ct = videoEl.currentTime;
+        if (ct === lastVideoTime) return;
+        lastVideoTime = ct;
+        try {
+            processResults(gestureRecognizer.recognizeForVideo(videoEl, performance.now()));
+        } catch(e) { console.warn("recognizeForVideo:", e); }
+    }
+
+    // ── Process results ───────────────────────────────────────────────────────
+    function processResults(results) {
+        const numHands = results.gestures?.length || 0;
+        for (let i = 0; i < numHands; i++) {
+            const handLabel = results.handedness?.[i]?.[0]?.displayName || "Right";
+            const gs = results.gestures[i];
+            if (!gs?.length) { holdBufs[handLabel] = []; continue; }
+            const best = gs.reduce((a, b) => a.score > b.score ? a : b);
+            if (best.score < MIN_CONF || best.categoryName === "None") {
+                holdBufs[handLabel] = []; continue;
+            }
+
+            // Show live detection feedback immediately
+            const liveLabel = GESTURE_LABELS[best.categoryName] || best.categoryName;
+            setStatus(`[${handLabel}] Detecting: ${liveLabel} (${Math.round(best.score*100)}%)`);
+
+            holdBufs[handLabel].push(best.categoryName);
+            if (holdBufs[handLabel].length > HOLD_FRAMES) holdBufs[handLabel].shift();
+
+            const buf = holdBufs[handLabel];
+            if (buf.length === HOLD_FRAMES) {
+                // Majority vote — 8 out of 10 frames agree (more robust than all-identical)
+                const counts = {};
+                buf.forEach(g => counts[g] = (counts[g] || 0) + 1);
+                const topGesture = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+                if (topGesture[1] >= 8) {
+                    const confirmed = topGesture[0];
+                    holdBufs[handLabel] = [];
+                    if (confirmed !== lastGesture[handLabel]) {
+                        lastGesture[handLabel] = confirmed;
+                        tokenBuffer.push(confirmed);
+                        if (tokenBuffer.length > 5) tokenBuffer = tokenBuffer.slice(-5);
+                        const lbl = GESTURE_LABELS[confirmed] || confirmed;
+                        setStatus(`✓ [${handLabel}] ${confirmed} → ${lbl} — sending...`);
+                        if (senderWS?.readyState === WebSocket.OPEN)
+                            senderWS.send(JSON.stringify({ type: "gesture", tokens: [...tokenBuffer] }));
+                        // Allow same gesture again after 2s
+                        setTimeout(() => { lastGesture[handLabel] = ""; }, 2000);
+                    }
+                }
+            }
+        }
+        if (numHands === 0) {
+            if (!window._noInputTimer) {
+                window._noInputTimer = setTimeout(() => {
+                    tokenBuffer = []; lastGesture = { Left:"", Right:"" };
+                    holdBufs = { Left:[], Right:[] };
+                    if (senderWS?.readyState === WebSocket.OPEN)
+                        senderWS.send(JSON.stringify({ type: "reset" }));
+                    window._noInputTimer = null;
+                    setStatus("Sign mode ON — hold a gesture 0.3s");
+                }, 3000);
+            }
+        } else {
+            clearTimeout(window._noInputTimer);
+            window._noInputTimer = null;
+        }
+    }
+    </script>
+</body>
+</html>

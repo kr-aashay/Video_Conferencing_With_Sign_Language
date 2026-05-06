@@ -1,7 +1,7 @@
 """
 train.py
 ════════════════════════════════════════════════════════════════════════════════
-HexaMinds — CSLR Training (maximum accuracy configuration)
+Aashay's Sign Lang — CSLR Training (maximum accuracy configuration)
 
 Target: ~99% training accuracy on ISL-CSLTR (687 samples, 641 classes)
 Strategy:

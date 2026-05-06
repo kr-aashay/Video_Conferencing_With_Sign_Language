@@ -1,7 +1,7 @@
 /**
  * holistic-bridge.js
  * ══════════════════════════════════════════════════════════════════════════════
- * HexaMinds — MediaPipe Holistic ↔ FastAPI WebSocket bridge
+ * Aashay's Sign Lang — MediaPipe Holistic ↔ FastAPI WebSocket bridge
  *
  * Responsibilities
  * ────────────────

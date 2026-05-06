@@ -1,7 +1,7 @@
 """
 api/app.py
 ══════════════════════════════════════════════════════════════════════════════
-HexaMinds — FastAPI WebSocket Inference Bridge
+Aashay's Sign Lang — FastAPI WebSocket Inference Bridge
 
 Endpoints
 ─────────
@@ -44,7 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config        import get_settings
-from .inference     import InferenceEngine
+from .inference     import InferenceEngine, _intent_fallback
 from .logger        import latency_tracker
 from .buffer_manager import FrameDropBuffer
 from .stream_buffer import (
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
     )
 
-    log.info("HexaMinds API starting up | device=%s", cfg.device)
+    log.info("Aashay's Sign Lang API starting up | device=%s", cfg.device)
 
     _engine = InferenceEngine(
         ckpt_path=cfg.model_ckpt_path,
@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="HexaMinds Sign Language Caption Bridge",
+    title="Aashay's Sign Lang Caption Bridge",
     version="2.0.0",
     description="Real-time sign language recognition → captions",
     lifespan=lifespan,
@@ -125,13 +125,15 @@ async def _send_json(ws: WebSocket, payload: dict) -> None:
 async def _run_inference(session: ConnectionSession) -> dict | None:
     """
     Run inference on the current sliding window.
-    Returns the broadcast payload or None if suppressed by cooldown.
+    AdaptiveLatencyGuard ensures the frontend always gets a response —
+    if Ollama is slow, _intent_fallback is served immediately.
     """
     cfg = get_settings()
 
     frames = session.buffer.get_window()
     session.inferences_run += 1
 
+    t0 = time.perf_counter()
     try:
         result = await _engine.predict_window(frames)
     except Exception as exc:
@@ -141,6 +143,12 @@ async def _run_inference(session: ConnectionSession) -> dict | None:
     glosses    = result["glosses"]
     caption    = result["caption"]
     latency_ms = result["latency_ms"]
+
+    # If caption is still raw glosses (SLM timed out), serve instant fallback
+    clean = [g for g in glosses if g not in ("<blank>", "<unk>")]
+    if caption == " ".join(clean) and clean:
+        caption = _intent_fallback(clean)
+        log.debug("AdaptiveLatencyGuard: served fallback caption: %r", caption)
 
     latency_tracker.record(
         session_id=session.connection_id,
@@ -158,7 +166,6 @@ async def _run_inference(session: ConnectionSession) -> dict | None:
 
     session.cooldown.record_emission(glosses)
 
-    clean = [g for g in glosses if g not in ("<blank>", "<unk>")]
     session.pending_glosses.extend(clean)
 
     if len(session.pending_glosses) < cfg.slm_confidence:

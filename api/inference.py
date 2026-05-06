@@ -1,15 +1,15 @@
 """
 api/inference.py
 ════════════════════════════════════════════════════════════════════════════════
-HexaMinds — Inference Engine + Ollama Refinement Bridge
+Aashay's Sign Lang — Inference Engine + Ollama Refinement Bridge
 
 Pipeline
 ────────
-  frames (T, 1629)
+  frames (T, 225)
       │
       ▼
   CSLRPredictor          [ThreadPoolExecutor — never blocks event loop]
-  Bi-LSTM + CTC beam
+  Bi-LSTM + CrossEntropy
       │
       ├─ glosses  ──────────────────────────────────────────────────────────┐
       │                                                                     │
@@ -18,26 +18,16 @@ Pipeline
               ▼                                                              │
       OllamaRefinementBridge                [asyncio — native async]        │
       phi3 / any Ollama model                                               │
-      200 ms hard timeout                                                   │
+      200 ms hard timeout → AdaptiveLatencyGuard fallback                  │
               │                                                             │
               ├─ success → refined English sentence                         │
-              └─ timeout / error → raw gloss string ◄────────────────────── ┘
+              └─ timeout / error → _intent_fallback (instant) ◄────────────┘
 
 SLM providers
 ─────────────
   SLM_PROVIDER=ollama   (default — local Phi-3, zero cloud cost)
   SLM_PROVIDER=openai   (any OpenAI-compatible endpoint)
   SLM_PROVIDER=none     (passthrough — raw glosses only)
-
-Ollama quick-start
-──────────────────
-  1. Install:  https://ollama.com
-  2. Pull:     ollama pull phi3
-  3. .env:     SLM_PROVIDER=ollama
-
-Timeout
-───────
-  OLLAMA_TIMEOUT_MS=200   (default — falls back to raw glosses above this)
 """
 
 from __future__ import annotations
@@ -63,13 +53,85 @@ OLLAMA_TIMEOUT_MS: float = float(os.environ.get("OLLAMA_TIMEOUT_MS",  "200"))
 
 # ── Context-aware system prompt ───────────────────────────────────────────────
 _SYSTEM_PROMPT = (
-    "You are a linguistic expert in Indian Sign Language. "
-    "Translate the following sequence of signs into a natural, professional "
-    "English sentence for a banking fraud detection context. "
+    "You are a professional Sign Language interpreter. "
+    "I will provide signs in Gloss format (e.g., STORE ME GO). "
+    "You must translate this into natural, grammatically correct English "
+    "(e.g., 'I am going to the store.'). "
+    "Use previous conversation history to resolve pronouns like HE or SHE. "
     "Output ONLY the sentence — no explanation, no extra punctuation."
 )
 
 _USER_TEMPLATE = "Signs: {glosses}"
+
+# ── Intent fallback map (mirrors test_live_caption.py) ───────────────────────
+_FALLBACK_MAP: dict[frozenset, str] = {
+    frozenset(["hello"]):              "Hello there.",
+    frozenset(["hello", "i"]):         "Hello, I am here.",
+    frozenset(["i", "yes"]):           "Yes, I agree.",
+    frozenset(["i", "no"]):            "No, I don't agree.",
+    frozenset(["i", "love"]):          "I love you.",
+    frozenset(["stop", "no"]):         "Please stop.",
+    frozenset(["yes", "agree"]):       "Yes, I completely agree.",
+    frozenset(["no", "disagree"]):     "No, I disagree.",
+    frozenset(["hello", "yes"]):       "Hello! Yes, I'm ready.",
+    frozenset(["i", "stop", "no"]):    "I need to stop. This isn't right.",
+    frozenset(["i", "attention"]):     "Excuse me, I have something to say.",
+    frozenset(["yes", "good"]):        "Yes, that's a good idea.",
+    frozenset(["no", "bad"]):          "No, that's not a good idea.",
+}
+
+
+def _intent_fallback(glosses: list[str]) -> str:
+    """Instant local fallback — no network required."""
+    key = frozenset(g.lower() for g in glosses[:3])
+    if key in _FALLBACK_MAP:
+        return _FALLBACK_MAP[key]
+    best, best_score = "", 0
+    for k, v in _FALLBACK_MAP.items():
+        score = len(k & key)
+        if score > best_score:
+            best, best_score = v, score
+    if best_score >= 1:
+        return best
+    return " ".join(glosses[:3]).capitalize() + "."
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# AdaptiveLatencyGuard
+# ════════════════════════════════════════════════════════════════════════════════
+
+class AdaptiveLatencyGuard:
+    """
+    Tracks Ollama call latency (rolling window).
+    If p99 exceeds OLLAMA_TIMEOUT_MS, immediately serves _intent_fallback
+    to the frontend — zero additional delay.
+    Also writes p99 to logs/perf.jsonl on every record() call.
+    """
+
+    def __init__(self, timeout_ms: float, window: int = 20) -> None:
+        self._timeout  = timeout_ms
+        self._samples: list[float] = []
+        self._maxlen   = window
+        self._lock     = __import__("threading").Lock()
+
+    def record(self, latency_ms: float) -> None:
+        with self._lock:
+            self._samples.append(latency_ms)
+            if len(self._samples) > self._maxlen:
+                self._samples.pop(0)
+
+    @property
+    def p99(self) -> float:
+        with self._lock:
+            s = sorted(self._samples)
+        if not s:
+            return 0.0
+        idx = min(int(0.99 * len(s)), len(s) - 1)
+        return round(s[idx], 2)
+
+    def should_skip(self) -> bool:
+        """True if recent p99 > timeout — serve fallback immediately."""
+        return len(self._samples) >= 5 and self.p99 > self._timeout
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -104,6 +166,7 @@ class OllamaRefinementBridge:
             self._model      = model
             self._timeout_s  = timeout_ms / 1000.0
             self._available  = True
+            self._guard      = AdaptiveLatencyGuard(timeout_ms=timeout_ms)
             log.info(
                 "OllamaRefinementBridge ready | model=%s host=%s timeout=%.0fms",
                 model, host, timeout_ms,
@@ -114,6 +177,7 @@ class OllamaRefinementBridge:
                 "Run: pip install ollama"
             )
             self._available = False
+            self._guard     = AdaptiveLatencyGuard(timeout_ms=timeout_ms)
 
     @property
     def available(self) -> bool:
@@ -138,6 +202,15 @@ class OllamaRefinementBridge:
         if not self._available or not glosses:
             return raw, False
 
+        # AdaptiveLatencyGuard: if p99 > timeout, serve fallback immediately
+        if self._guard.should_skip():
+            fallback = _intent_fallback(glosses)
+            log.warning(
+                "AdaptiveLatencyGuard: p99=%.0fms > %.0fms — serving fallback: %r",
+                self._guard.p99, self._timeout_s * 1000, fallback,
+            )
+            return fallback, False
+
         messages = [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user",   "content": _USER_TEMPLATE.format(glosses=raw)},
@@ -155,6 +228,7 @@ class OllamaRefinementBridge:
             )
             caption  = response.message.content.strip()
             elapsed  = (time.perf_counter() - t0) * 1000
+            self._guard.record(elapsed)
             log.debug(
                 "Ollama refined: %r → %r  (%.1f ms)",
                 raw, caption, elapsed,
@@ -163,14 +237,17 @@ class OllamaRefinementBridge:
 
         except asyncio.TimeoutError:
             elapsed = (time.perf_counter() - t0) * 1000
+            self._guard.record(elapsed)
+            fallback = _intent_fallback(glosses)
             log.warning(
-                "Ollama timeout after %.1f ms (limit %.0f ms) — "
-                "returning raw glosses: %r",
-                elapsed, OLLAMA_TIMEOUT_MS * 1000, raw,
+                "Ollama timeout after %.1f ms — AdaptiveLatencyGuard serving fallback: %r",
+                elapsed, fallback,
             )
-            return raw, False
+            return fallback, False
 
         except Exception as exc:
+            elapsed = (time.perf_counter() - t0) * 1000
+            self._guard.record(elapsed)
             log.warning("Ollama error (%s) — returning raw glosses", exc)
             return raw, False
 

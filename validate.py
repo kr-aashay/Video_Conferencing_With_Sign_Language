@@ -289,7 +289,7 @@ def main() -> None:
     quick = "--quick" in sys.argv
 
     print(f"{_BOLD}{'═' * 56}{_RESET}")
-    print(f"{_BOLD}  HexaMinds Project Validation{_RESET}")
+    print(f"{_BOLD}  Aashay's Sign Lang Project Validation{_RESET}")
     print(f"{_BOLD}{'═' * 56}{_RESET}")
 
     total_failures = 0

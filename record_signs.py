@@ -108,7 +108,7 @@ def save_clip(frames_data: list[dict], sign: str, clip_idx: int) -> Path:
 
 def main():
     print("═" * 60)
-    print("  HexaMinds — Record Your Own Signs")
+    print("  Aashay's Sign Lang — Record Your Own Signs")
     print("═" * 60)
     print(f"  Signs to record : {SIGNS}")
     print(f"  Clips per sign  : {CLIPS_PER_SIGN}")
